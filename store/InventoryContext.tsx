@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Product, CartItem, PriceListId } from '../types';
-import { supabase } from '../services/supabaseClient';
+import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
+import { updateSingleProduct } from '../services/excelService';
 
 interface InventoryContextType {
   products: Product[];
   refreshProducts: () => Promise<void>;
+  updateProduct: (product: Product) => Promise<void>;
   isLoading: boolean;
   cart: CartItem[];
   addToCart: (product: Product, quantity: number, listId: PriceListId) => void;
@@ -28,17 +30,37 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const fetchProducts = async () => {
     setIsLoading(true);
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .order('name');
     
-    if (error) {
-      console.error('Error fetching products:', error);
-    } else {
-      setProducts(data || []);
+    try {
+      if (isSupabaseConfigured()) {
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .order('name');
+        
+        if (error) {
+          console.error('Error fetching products from Supabase:', error.message || error);
+          // If fetch fails, we might want to fail silently or fallback? 
+          // For now, let's allow empty if error.
+          setProducts([]); 
+        } else {
+          setProducts(data || []);
+        }
+      } else {
+        // Fallback: Load from LocalStorage if Supabase is not set up
+        const savedData = localStorage.getItem('alfonsa_products_backup');
+        if (savedData) {
+          setProducts(JSON.parse(savedData));
+        } else {
+          setProducts([]);
+        }
+      }
+    } catch (err) {
+      console.error("Unexpected error fetching products:", err);
+      setProducts([]);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   // Initial Fetch
@@ -53,6 +75,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const refreshProducts = async () => {
     await fetchProducts();
+  };
+
+  const updateProduct = async (updatedProduct: Product) => {
+    // Optimistic Update
+    setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+    
+    try {
+      await updateSingleProduct(updatedProduct);
+    } catch (e) {
+      console.error("Error updating product:", e);
+      // Revert logic could go here, but keeping it simple for now
+      alert("Error guardando el cambio en la base de datos.");
+      await fetchProducts(); // Revert by refetching
+    }
   };
 
   const addToCart = (product: Product, quantity: number, listId: PriceListId) => {
@@ -105,6 +141,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     <InventoryContext.Provider value={{ 
       products, 
       refreshProducts,
+      updateProduct,
       isLoading,
       cart, 
       addToCart, 
