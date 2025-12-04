@@ -128,22 +128,18 @@ export const bulkUpsertProducts = async (products: Product[]) => {
 };
 
 export const updateSingleProduct = async (product: Product) => {
-  if (isSupabaseConfigured()) {
-    const { error } = await supabase
-      .from('products')
-      .update(product)
-      .eq('id', product.id);
-    
-    if (error) {
-      throw new Error(`Error actualizando producto: ${error.message}`);
-    }
-  } else {
-    // Fallback LocalStorage
-    const saved = localStorage.getItem('alfonsa_products_backup');
-    if (saved) {
-      let products = JSON.parse(saved) as Product[];
-      products = products.map(p => p.id === product.id ? product : p);
-      localStorage.setItem('alfonsa_products_backup', JSON.stringify(products));
-    }
+  const res = await fetch('/api/updateProduct', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      product,
+      secret: import.meta.env.VITE_ADMIN_SECRET
+    })
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(data.error || "Error desconocido al actualizar producto");
   }
 };
