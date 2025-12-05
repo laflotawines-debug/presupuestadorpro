@@ -7,12 +7,15 @@ const Navbar: React.FC = () => {
   const isAdmin = location.pathname === '/admin';
   const isSpecial = location.pathname.includes('lista-china');
 
+  // Si es lista especial, el logo recarga la misma lista. Si no, va al home general.
+  const logoDestination = isSpecial ? '/lista-china' : '/';
+
   return (
     <nav className="bg-chalkboard text-white shadow-lg sticky top-0 z-50 border-b-4 border-alfonsa">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
           <div className="flex items-center">
-            <Link to="/" className="flex-shrink-0 flex items-center space-x-2">
+            <Link to={logoDestination} className="flex-shrink-0 flex items-center space-x-2">
               <div className="bg-alfonsa p-2 rounded-lg transform rotate-3">
                 <ShoppingBag className="h-6 w-6 text-white" />
               </div>

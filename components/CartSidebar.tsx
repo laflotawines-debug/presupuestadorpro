@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useInventory } from '../store/InventoryContext';
-import { Trash2, X, FileText, Send, ShoppingCart } from 'lucide-react';
+import { Trash2, X, FileText, Send, ShoppingCart, ArrowLeft } from 'lucide-react';
 import { generatePDF, generateWhatsAppLink } from '../services/pdfService';
 
 interface CartSidebarProps {
@@ -116,13 +116,23 @@ const CartSidebar: React.FC<CartSidebarProps> = ({ isOpen, onClose, isSpecial })
            </button>
         </div>
         
-        <button 
-           onClick={clearCart}
-           disabled={cart.length === 0}
-           className="w-full text-center text-xs text-red-500 hover:underline"
-        >
-          Vaciar Presupuesto
-        </button>
+        <div className="flex justify-between items-center mt-2 border-t pt-2">
+           <button 
+             onClick={onClose} 
+             className="md:hidden flex items-center text-gray-500 hover:text-gray-700 py-1"
+           >
+              <ArrowLeft className="w-4 h-4 mr-1" />
+              <span className="text-xs font-bold uppercase">Volver</span>
+           </button>
+           
+           <button 
+             onClick={clearCart}
+             disabled={cart.length === 0}
+             className="text-xs text-red-500 hover:underline py-1 ml-auto"
+           >
+             Vaciar Presupuesto
+           </button>
+        </div>
       </div>
     </div>
   );

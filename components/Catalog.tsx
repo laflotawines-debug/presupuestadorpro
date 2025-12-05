@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useInventory } from '../store/InventoryContext';
 import { PriceListId } from '../types';
-import { Search, Plus, ShoppingCart, Check, Loader2, Filter } from 'lucide-react';
+import { Search, Plus, ShoppingCart, Check, Loader2, Filter, ArrowUpDown } from 'lucide-react';
 import CartSidebar from './CartSidebar';
 
 interface CatalogProps {
@@ -9,10 +9,12 @@ interface CatalogProps {
 }
 
 const Catalog: React.FC<CatalogProps> = ({ isSpecialList = false }) => {
-  const { products, addToCart, cart, isLoading } = useInventory();
+  const { products, addToCart, updateCartPrices, cart, isLoading } = useInventory();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedList, setSelectedList] = useState<PriceListId>(isSpecialList ? 4 : 1);
   const [selectedFamily, setSelectedFamily] = useState('');
+  const [selectedSubfamily, setSelectedSubfamily] = useState('');
+  const [sortOrder, setSortOrder] = useState<'name' | 'price_asc' | 'price_desc'>('name');
   
   // State for inputs: keys are product IDs, values are strings to allow empty state while typing
   const [localQuantities, setLocalQuantities] = useState<Record<string, string>>({});
@@ -32,13 +34,46 @@ const Catalog: React.FC<CatalogProps> = ({ isSpecialList = false }) => {
     return Array.from(families).sort();
   }, [products]);
 
+  // Extract unique subfamilies based on selected Family
+  const uniqueSubfamilies = useMemo(() => {
+    const subfamilies = new Set(
+      products
+        .filter(p => {
+           if (p.stock <= 0) return false;
+           if (selectedFamily && p.family !== selectedFamily) return false;
+           return !!p.subfamily;
+        })
+        .map(p => p.subfamily)
+    );
+    return Array.from(subfamilies).sort();
+  }, [products, selectedFamily]);
+
+  const getPrice = (product: any, listId: PriceListId) => {
+    switch(listId) {
+      case 1: return product.price_1;
+      case 2: return product.price_2;
+      case 3: return product.price_3;
+      case 4: return product.price_4;
+      default: return product.price_1;
+    }
+  };
+
+  const handleListChange = (id: PriceListId) => {
+    setSelectedList(id);
+    // Automatically update prices of items already in cart
+    updateCartPrices(id);
+  };
+
   const filteredProducts = useMemo(() => {
-    return products.filter(p => {
+    let result = products.filter(p => {
       // FILTRO DE STOCK: Si no hay stock, no se muestra en la web.
       if (p.stock <= 0) return false;
 
       // Filter by Family
       if (selectedFamily && p.family !== selectedFamily) return false;
+
+      // Filter by Subfamily
+      if (selectedSubfamily && p.subfamily !== selectedSubfamily) return false;
 
       // Filter by search
       const term = searchTerm.toLowerCase();
@@ -49,16 +84,25 @@ const Catalog: React.FC<CatalogProps> = ({ isSpecialList = false }) => {
       
       return matchesSearch;
     });
-  }, [products, searchTerm, selectedFamily]);
 
-  const getPrice = (product: any, listId: PriceListId) => {
-    switch(listId) {
-      case 1: return product.price_1;
-      case 2: return product.price_2;
-      case 3: return product.price_3;
-      case 4: return product.price_4;
-      default: return product.price_1;
-    }
+    // Sorting
+    result.sort((a, b) => {
+      if (sortOrder === 'price_asc') {
+        return getPrice(a, selectedList) - getPrice(b, selectedList);
+      }
+      if (sortOrder === 'price_desc') {
+        return getPrice(b, selectedList) - getPrice(a, selectedList);
+      }
+      // Default name A-Z
+      return a.name.localeCompare(b.name);
+    });
+
+    return result;
+  }, [products, searchTerm, selectedFamily, selectedSubfamily, sortOrder, selectedList]);
+
+  const handleFamilyChange = (val: string) => {
+    setSelectedFamily(val);
+    setSelectedSubfamily(''); // Reset subfamily when family changes
   };
 
   const handleQuantityChange = (id: string, val: string, max: number) => {
@@ -96,20 +140,27 @@ const Catalog: React.FC<CatalogProps> = ({ isSpecialList = false }) => {
     }
   };
 
+  // Determine theme colors
+  const themeClass = isSpecialList 
+    ? 'bg-red-800 border-red-700 text-white focus:ring-red-400 placeholder-red-300' 
+    : 'bg-white border-gray-300 text-gray-700 focus:ring-alfonsa hover:border-alfonsa';
+  
+  const iconClass = isSpecialList ? 'text-red-300' : 'text-gray-400';
+
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] overflow-hidden">
       {/* Top Bar */}
       <div className={`shadow-sm p-4 z-20 ${isSpecialList ? 'bg-red-900' : 'bg-white'}`}>
-        <div className="max-w-7xl mx-auto flex flex-col lg:flex-row gap-4 justify-between items-center">
+        <div className="max-w-7xl mx-auto flex flex-col xl:flex-row gap-4 justify-between items-start xl:items-center">
           
           {/* Group: List Selector + Title */}
-          <div className="flex items-center w-full lg:w-auto justify-between lg:justify-start gap-4">
+          <div className="flex items-center w-full xl:w-auto justify-between xl:justify-start gap-4">
             {!isSpecialList ? (
               <div className="flex bg-gray-100 p-1 rounded-lg shrink-0">
                 {[1, 2, 3].map((id) => (
                   <button
                     key={id}
-                    onClick={() => setSelectedList(id as PriceListId)}
+                    onClick={() => handleListChange(id as PriceListId)}
                     className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-md transition-all ${
                       selectedList === id 
                         ? 'bg-white text-alfonsa shadow-sm' 
@@ -128,42 +179,67 @@ const Catalog: React.FC<CatalogProps> = ({ isSpecialList = false }) => {
           </div>
 
           {/* Group: Filters & Search */}
-          <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+          <div className="flex flex-col sm:flex-row gap-2 w-full xl:w-auto flex-wrap items-center">
             
+            {/* Sort Filter */}
+            <div className="relative w-full sm:w-40">
+               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <ArrowUpDown className={`h-4 w-4 ${iconClass}`} />
+              </div>
+              <select
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as any)}
+                className={`block w-full pl-10 pr-8 py-2 border rounded-lg appearance-none text-sm focus:ring-2 focus:outline-none cursor-pointer ${themeClass}`}
+              >
+                <option value="name" className="text-gray-900 bg-white">Nombre A-Z</option>
+                <option value="price_asc" className="text-gray-900 bg-white">Menor Precio</option>
+                <option value="price_desc" className="text-gray-900 bg-white">Mayor Precio</option>
+              </select>
+            </div>
+
             {/* Family Filter */}
-            <div className="relative min-w-[180px]">
+            <div className="relative w-full sm:w-48">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Filter className={`h-4 w-4 ${isSpecialList ? 'text-red-300' : 'text-gray-400'}`} />
+                <Filter className={`h-4 w-4 ${iconClass}`} />
               </div>
               <select
                 value={selectedFamily}
-                onChange={(e) => setSelectedFamily(e.target.value)}
-                className={`block w-full pl-10 pr-8 py-2 border rounded-lg appearance-none text-sm focus:ring-2 focus:outline-none cursor-pointer
-                  ${isSpecialList 
-                    ? 'bg-red-800 border-red-700 text-white focus:ring-red-400' 
-                    : 'bg-white border-gray-300 text-gray-700 focus:ring-alfonsa hover:border-alfonsa'}`}
+                onChange={(e) => handleFamilyChange(e.target.value)}
+                className={`block w-full pl-10 pr-8 py-2 border rounded-lg appearance-none text-sm focus:ring-2 focus:outline-none cursor-pointer ${themeClass}`}
               >
                 <option value="" className="text-gray-500">Todas las Familias</option>
                 {uniqueFamilies.map(f => (
                   <option key={f} value={f} className="text-gray-900 bg-white">{f}</option>
                 ))}
               </select>
-              {/* Custom arrow icon for select */}
-              <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
-                <svg className={`w-4 h-4 ${isSpecialList ? 'text-red-300' : 'text-gray-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-              </div>
             </div>
 
+            {/* SubFamily Filter (Conditional) */}
+            {uniqueSubfamilies.length > 0 && (
+              <div className="relative w-full sm:w-48">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Filter className={`h-4 w-4 ${iconClass}`} />
+                </div>
+                <select
+                  value={selectedSubfamily}
+                  onChange={(e) => setSelectedSubfamily(e.target.value)}
+                  className={`block w-full pl-10 pr-8 py-2 border rounded-lg appearance-none text-sm focus:ring-2 focus:outline-none cursor-pointer ${themeClass}`}
+                >
+                  <option value="" className="text-gray-500">Todas las Subfamilias</option>
+                  {uniqueSubfamilies.map(f => (
+                    <option key={f} value={f} className="text-gray-900 bg-white">{f}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* Search Input */}
-            <div className="relative w-full sm:w-64 lg:w-80">
-              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isSpecialList ? 'text-red-300' : 'text-gray-400'}`} />
+            <div className="relative w-full sm:w-56">
+              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${iconClass}`} />
               <input 
                 type="text" 
-                placeholder="Buscar por nombre..." 
-                className={`w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:outline-none text-sm
-                  ${isSpecialList 
-                    ? 'bg-red-800 border-red-700 text-white placeholder-red-300 focus:ring-red-400' 
-                    : 'bg-white border-gray-300 focus:ring-alfonsa'}`}
+                placeholder="Buscar..." 
+                className={`w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:outline-none text-sm ${themeClass}`}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -186,11 +262,16 @@ const Catalog: React.FC<CatalogProps> = ({ isSpecialList = false }) => {
           ) : (
           <div className="max-w-7xl mx-auto">
             {/* Results Count */}
-            <div className="mb-4 text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center justify-between">
-              <span>{filteredProducts.length} Productos Encontrados</span>
+            <div className="mb-4 text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center flex-wrap gap-2">
+              <span>{filteredProducts.length} Productos</span>
               {selectedFamily && (
-                <span className="bg-gray-200 text-gray-700 px-2 py-1 rounded">
-                   Filtro: {selectedFamily}
+                <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded border border-orange-200">
+                   F: {selectedFamily}
+                </span>
+              )}
+              {selectedSubfamily && (
+                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded border border-blue-200">
+                   S: {selectedSubfamily}
                 </span>
               )}
             </div>
@@ -206,7 +287,7 @@ const Catalog: React.FC<CatalogProps> = ({ isSpecialList = false }) => {
                     {/* Card Header */}
                     <div className="p-4 flex-1">
                       <div className="flex justify-between items-start mb-2">
-                         <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400 border border-gray-100 px-1 rounded">
+                         <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400 border border-gray-100 px-1 rounded truncate max-w-[70%]">
                            {product.family}
                          </span>
                       </div>
@@ -214,7 +295,7 @@ const Catalog: React.FC<CatalogProps> = ({ isSpecialList = false }) => {
                         {product.name}
                       </h3>
                       <div className="flex justify-between items-end">
-                        <span className="text-xs text-gray-400 font-mono">{product.subfamily}</span>
+                        <span className="text-xs text-gray-400 font-mono truncate max-w-[50%]" title={product.subfamily}>{product.subfamily}</span>
                         <div className={`text-2xl font-bold ${isSpecialList ? 'text-red-600' : 'text-alfonsa'}`}>
                           ${price.toLocaleString('es-AR')}
                         </div>
@@ -264,7 +345,7 @@ const Catalog: React.FC<CatalogProps> = ({ isSpecialList = false }) => {
               <div className="col-span-full text-center py-20 text-gray-400 flex flex-col items-center">
                 <Search className="h-12 w-12 text-gray-300 mb-2" />
                 <p className="text-lg">No se encontraron productos.</p>
-                <p className="text-sm">Intenta cambiar el filtro de familia o la búsqueda.</p>
+                <p className="text-sm">Intenta cambiar los filtros o la búsqueda.</p>
               </div>
             )}
           </div>

@@ -12,6 +12,7 @@ interface InventoryContextType {
   addToCart: (product: Product, quantity: number, listId: PriceListId) => void;
   removeFromCart: (productId: string) => void;
   updateCartQuantity: (productId: string, quantity: number) => void;
+  updateCartPrices: (newListId: PriceListId) => void;
   clearCart: () => void;
   cartTotal: number;
 }
@@ -33,15 +34,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     
     try {
       if (isSupabaseConfigured()) {
-        const { data, error } = await supabase
-          .from('products')
-          .select('*')
-          .order('name');
+const { data, error } = await supabase
+  .from('products')
+  .select('*')
+  .order('name', { ascending: true })
+  .range(0, 3000);
+
+
         
         if (error) {
           console.error('Error fetching products from Supabase:', error.message || error);
-          // If fetch fails, we might want to fail silently or fallback? 
-          // For now, let's allow empty if error.
           setProducts([]); 
         } else {
           setProducts(data || []);
@@ -85,29 +87,32 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       await updateSingleProduct(updatedProduct);
     } catch (e) {
       console.error("Error updating product:", e);
-      // Revert logic could go here, but keeping it simple for now
       alert("Error guardando el cambio en la base de datos.");
       await fetchProducts(); // Revert by refetching
     }
   };
 
-  const addToCart = (product: Product, quantity: number, listId: PriceListId) => {
-    // Determine price based on list
-    let price = 0;
+  const getPriceByList = (product: Product, listId: PriceListId): number => {
     switch(listId) {
-      case 1: price = product.price_1; break;
-      case 2: price = product.price_2; break;
-      case 3: price = product.price_3; break;
-      case 4: price = product.price_4; break;
-      default: price = product.price_1;
+      case 1: return product.price_1;
+      case 2: return product.price_2;
+      case 3: return product.price_3;
+      case 4: return product.price_4;
+      default: return product.price_1;
     }
+  };
+
+  const addToCart = (product: Product, quantity: number, listId: PriceListId) => {
+    const price = getPriceByList(product, listId);
 
     setCart(prev => {
       const existing = prev.find(p => p.id === product.id);
       if (existing) {
         // Enforce stock limit on update
         const newQty = Math.min(existing.quantity + quantity, product.stock);
-        return prev.map(p => p.id === product.id ? { ...p, quantity: newQty } : p);
+        // If we add to existing, we update the price to the CURRENT selection list too, or keep old?
+        // Prompt says: "lists never mix". So if I add, I should probably enforce the new list on this item.
+        return prev.map(p => p.id === product.id ? { ...p, quantity: newQty, selectedPrice: price, selectedListId: listId } : p);
       } else {
         // Enforce stock limit on initial add
         const safeQty = Math.min(quantity, product.stock);
@@ -124,13 +129,28 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const updateCartQuantity = (productId: string, quantity: number) => {
     setCart(prev => prev.map(item => {
       if (item.id === productId) {
-        // Find original product to check stock again
         const originalProduct = products.find(p => p.id === productId);
         const maxStock = originalProduct ? originalProduct.stock : item.stock;
         return { ...item, quantity: Math.min(Math.max(0, quantity), maxStock) };
       }
       return item;
     }).filter(item => item.quantity > 0));
+  };
+
+  // New function to update all prices in cart when list changes
+  const updateCartPrices = (newListId: PriceListId) => {
+    setCart(prev => prev.map(item => {
+      const originalProduct = products.find(p => p.id === item.id);
+      if (!originalProduct) return item; // Should not happen usually
+      
+      const newPrice = getPriceByList(originalProduct, newListId);
+      
+      return {
+        ...item,
+        selectedPrice: newPrice,
+        selectedListId: newListId
+      };
+    }));
   };
 
   const clearCart = () => setCart([]);
@@ -147,6 +167,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       addToCart, 
       removeFromCart, 
       updateCartQuantity,
+      updateCartPrices,
       clearCart,
       cartTotal 
     }}>

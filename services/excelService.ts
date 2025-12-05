@@ -2,6 +2,10 @@ import * as XLSX from 'xlsx';
 import { Product, ExcelArticleRow, ExcelStockRow } from '../types';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
+
+// ==============================
+// PARSEAR ARTÍCULOS
+// ==============================
 export const parseArticlesExcel = async (file: File): Promise<Partial<Product>[]> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -11,8 +15,7 @@ export const parseArticlesExcel = async (file: File): Promise<Partial<Product>[]
         const workbook = XLSX.read(data, { type: 'binary' });
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
-        
-        // Read file holding raw data
+
         const jsonData = XLSX.utils.sheet_to_json<ExcelArticleRow>(sheet);
 
         const products: Partial<Product>[] = jsonData.map((row) => ({
@@ -24,20 +27,25 @@ export const parseArticlesExcel = async (file: File): Promise<Partial<Product>[]
           price_2: Number(row.pventa_2) || 0,
           price_3: Number(row.pventa_3) || 0,
           price_4: Number(row.pventa_4) || 0,
-          stock: 0, // Default stock 0 until merged
-        })).filter(p => p.id !== ''); // Filter out empty rows
+          stock: 0, 
+        })).filter(p => p.id !== '');
 
         resolve(products);
       } catch (error) {
         reject(error);
       }
     };
+
     reader.onerror = (error) => reject(error);
     reader.readAsBinaryString(file);
   });
 };
 
-export const parseStockExcel = async (file: File): Promise<{id: string, stock: number}[]> => {
+
+// ==============================
+// PARSEAR STOCK (SANEAR DECIMALES)
+// ==============================
+export const parseStockExcel = async (file: File): Promise<{ id: string, stock: number }[]> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -47,86 +55,108 @@ export const parseStockExcel = async (file: File): Promise<{id: string, stock: n
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
 
-        // Stock file starts at row 8 (index 7)
         const jsonData = XLSX.utils.sheet_to_json<ExcelStockRow>(sheet, { range: 7 });
 
-        const stockItems = jsonData.map(row => ({
-          id: String(row['Código'] || '').trim(),
-          stock: Number(row['Stock']) || 0
-        })).filter(item => item.id !== '');
+        const stockItems = jsonData.map(row => {
+          const raw = Number(row['Stock']);
+          const cleanStock = Number.isFinite(raw) ? Math.floor(raw) : 0;
+
+          return {
+            id: String(row['Código'] || '').trim(),
+            stock: cleanStock
+          };
+        }).filter(item => item.id !== '');
 
         resolve(stockItems);
       } catch (error) {
         reject(error);
       }
     };
+
     reader.onerror = (error) => reject(error);
     reader.readAsBinaryString(file);
   });
 };
 
-export const consolidateData = (articles: Partial<Product>[], stocks: {id: string, stock: number}[]): Product[] => {
-  // Create a map of articles for O(1) access
+
+// ==============================
+// CONSOLIDAR STOCK + ARTÍCULOS
+// ==============================
+export const consolidateData = (
+  articles: Partial<Product>[],
+  stocks: { id: string, stock: number }[]
+): Product[] => {
+
   const productMap = new Map<string, Product>();
 
-  // 1. Load articles
+  // Cargar artículos
   articles.forEach(art => {
     if (art.id) {
       productMap.set(art.id, art as Product);
     }
   });
 
-  // 2. Update stock
+  // Aplicar stock saneado
   stocks.forEach(stk => {
     const product = productMap.get(stk.id);
     if (product) {
-      product.stock = stk.stock;
-    } 
+      const cleanStock = Math.floor(Number(stk.stock) || 0);
+      product.stock = cleanStock;
+    }
   });
 
   return Array.from(productMap.values());
 };
 
+
+// ==============================
+// BORRAR TODOS LOS PRODUCTOS
+// ==============================
 export const deleteAllProducts = async () => {
   if (isSupabaseConfigured()) {
-    // Delete all rows where id is not empty (effectively all)
     const { error } = await supabase
       .from('products')
       .delete()
-      .neq('id', '______placeholder'); 
-    
+      .neq('id', '______placeholder');
+
     if (error) {
       throw new Error(`Error borrando datos antiguos: ${error.message}`);
     }
   } else {
-    // Fallback LocalStorage
     localStorage.removeItem('alfonsa_products_backup');
   }
 };
 
-// Function to upload to Supabase in batches
+
+// ==============================
+// UPSERT POR LOTES (BATCH SEGURO)
+// ==============================
 export const bulkUpsertProducts = async (products: Product[]) => {
   if (isSupabaseConfigured()) {
-    const BATCH_SIZE = 500;
-    
+    const BATCH_SIZE = 150;
+
     for (let i = 0; i < products.length; i += BATCH_SIZE) {
       const batch = products.slice(i, i + BATCH_SIZE);
-      
+
       const { error } = await supabase
         .from('products')
-        .upsert(batch, { onConflict: 'id' });
+        .upsert(batch, { onConflict: 'id' })
+        .select();   // <-- fuerza a mostrar errores reales
 
       if (error) {
         throw new Error(`Error subiendo lote ${i}: ${error.message}`);
       }
     }
   } else {
-    // Fallback LocalStorage
     console.warn("Supabase no configurado. Guardando en LocalStorage.");
     localStorage.setItem('alfonsa_products_backup', JSON.stringify(products));
   }
 };
 
+
+// ==============================
+// UPDATE INDIVIDUAL
+// ==============================
 export const updateSingleProduct = async (product: Product) => {
   const res = await fetch('/api/updateProduct', {
     method: 'POST',
