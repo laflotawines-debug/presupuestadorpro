@@ -29,25 +29,42 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return saved ? JSON.parse(saved) : [];
   });
 
- const fetchProducts = async () => {
+const fetchProducts = async () => {
   setIsLoading(true);
 
   try {
     if (isSupabaseConfigured()) {
-      // Ahora pedís los productos al backend que usa la SERVICE KEY
-      const res = await fetch('/api/products');
+      let all: Product[] = [];
+      let from = 0;
+      const size = 1000;
 
-      if (!res.ok) {
-        console.error("Error fetching products from backend:", await res.text());
-        setProducts([]);
-        return;
+      while (true) {
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .order('name', { ascending: true })
+          .range(from, from + size - 1);
+
+        if (error) {
+          console.error("Error fetching products page:", error);
+          break;
+        }
+
+        if (!data || data.length === 0) {
+          break; // no más filas
+        }
+
+        all = [...all, ...data];
+
+        if (data.length < size) {
+          break; // última página
+        }
+
+        from += size; // siguiente página
       }
 
-      const data = await res.json();
-      setProducts(data || []);
-      
+      setProducts(all);
     } else {
-      // Fallback local (si no hay Supabase configurado)
       const savedData = localStorage.getItem('alfonsa_products_backup');
       if (savedData) {
         setProducts(JSON.parse(savedData));
@@ -55,7 +72,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setProducts([]);
       }
     }
-
   } catch (err) {
     console.error("Unexpected error fetching products:", err);
     setProducts([]);
