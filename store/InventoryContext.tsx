@@ -13,7 +13,7 @@ interface InventoryContextType {
   removeFromCart: (productId: string) => void;
   updateCartQuantity: (productId: string, quantity: number) => void;
   updateCartPrices: (newListId: PriceListId) => void;
-  clearCart: () => void;
+  clearCart: (isSpecialView?: boolean) => void;
   cartTotal: number;
 }
 
@@ -29,57 +29,38 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return saved ? JSON.parse(saved) : [];
   });
 
-const fetchProducts = async () => {
-  setIsLoading(true);
-
-  try {
-    if (isSupabaseConfigured()) {
-      let all: Product[] = [];
-      let from = 0;
-      const size = 1000;
-
-      while (true) {
+  const fetchProducts = async () => {
+    setIsLoading(true);
+    
+    try {
+      if (isSupabaseConfigured()) {
         const { data, error } = await supabase
           .from('products')
           .select('*')
-          .order('name', { ascending: true })
-          .range(from, from + size - 1);
-
+          .order('name');
+        
         if (error) {
-          console.error("Error fetching products page:", error);
-          break;
+          console.error('Error fetching products from Supabase:', error.message || error);
+          setProducts([]); 
+        } else {
+          setProducts(data || []);
         }
-
-        if (!data || data.length === 0) {
-          break; // no más filas
-        }
-
-        all = [...all, ...data];
-
-        if (data.length < size) {
-          break; // última página
-        }
-
-        from += size; // siguiente página
-      }
-
-      setProducts(all);
-    } else {
-      const savedData = localStorage.getItem('alfonsa_products_backup');
-      if (savedData) {
-        setProducts(JSON.parse(savedData));
       } else {
-        setProducts([]);
+        // Fallback: Load from LocalStorage if Supabase is not set up
+        const savedData = localStorage.getItem('alfonsa_products_backup');
+        if (savedData) {
+          setProducts(JSON.parse(savedData));
+        } else {
+          setProducts([]);
+        }
       }
+    } catch (err) {
+      console.error("Unexpected error fetching products:", err);
+      setProducts([]);
+    } finally {
+      setIsLoading(false);
     }
-  } catch (err) {
-    console.error("Unexpected error fetching products:", err);
-    setProducts([]);
-  } finally {
-    setIsLoading(false);
-  }
-};
-
+  };
 
   // Initial Fetch
   useEffect(() => {
@@ -169,7 +150,17 @@ const fetchProducts = async () => {
     }));
   };
 
-  const clearCart = () => setCart([]);
+  const clearCart = (isSpecialView?: boolean) => {
+    if (isSpecialView === undefined) {
+      setCart([]);
+    } else if (isSpecialView) {
+      // Clear special items (list 4)
+      setCart(prev => prev.filter(item => item.selectedListId !== 4));
+    } else {
+      // Clear regular items (not list 4)
+      setCart(prev => prev.filter(item => item.selectedListId === 4));
+    }
+  };
 
   const cartTotal = cart.reduce((sum, item) => sum + (item.selectedPrice * item.quantity), 0);
 
