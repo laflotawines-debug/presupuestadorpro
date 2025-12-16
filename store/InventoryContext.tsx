@@ -29,38 +29,62 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return saved ? JSON.parse(saved) : [];
   });
 
-  const fetchProducts = async () => {
-    setIsLoading(true);
-    
-    try {
-      if (isSupabaseConfigured()) {
+const fetchProducts = async () => {
+  setIsLoading(true);
+
+  try {
+    if (isSupabaseConfigured()) {
+      const pageSize = 1000;
+      let from = 0;
+      let to = pageSize - 1;
+      let allProducts: Product[] = [];
+
+      while (true) {
         const { data, error } = await supabase
           .from('products')
           .select('*')
-          .order('name');
-        
+          .order('name')
+          .range(from, to);
+
         if (error) {
           console.error('Error fetching products from Supabase:', error.message || error);
-          setProducts([]); 
-        } else {
-          setProducts(data || []);
+          break;
         }
-      } else {
-        // Fallback: Load from LocalStorage if Supabase is not set up
-        const savedData = localStorage.getItem('alfonsa_products_backup');
-        if (savedData) {
-          setProducts(JSON.parse(savedData));
-        } else {
-          setProducts([]);
+
+        if (!data || data.length === 0) {
+          break;
         }
+
+        allProducts = allProducts.concat(data as Product[]);
+
+        // si vino menos de 1000, ya no hay más
+        if (data.length < pageSize) {
+          break;
+        }
+
+        from += pageSize;
+        to += pageSize;
       }
-    } catch (err) {
-      console.error("Unexpected error fetching products:", err);
-      setProducts([]);
-    } finally {
-      setIsLoading(false);
+
+      setProducts(allProducts);
+      console.log('PRODUCTOS CARGADOS:', allProducts.length);
+    } else {
+      // Fallback local
+      const savedData = localStorage.getItem('alfonsa_products_backup');
+      if (savedData) {
+        setProducts(JSON.parse(savedData));
+      } else {
+        setProducts([]);
+      }
     }
-  };
+  } catch (err) {
+    console.error('Unexpected error fetching products:', err);
+    setProducts([]);
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   // Initial Fetch
   useEffect(() => {
